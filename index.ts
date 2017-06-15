@@ -8,21 +8,131 @@ var directIndicator = 3;
 var attackEmitter;
 var hurlSpeed = 300;
 var isLinkSightLock = 0;
-var swords: Array<Sprite> = [];
+var swords: Array<SpriteWithState> = [];
+var animation_fires: Array<Sprite> = [];
+var fire:Sprite;
+var starTime = 30;
+var standBackSpeed = 24;
+var map;
+var layer;
+var isStab = false;
 // var preSword:Sprite;
+// 化学状态
+enum chemicalStates {
+    normal = 1,
+    fireCarrying,
+    electricCarrying,
+    moistureCarrying
+}
+// 化学动作
+enum chemicalActions {
+    normal = 1,
+    burn,
+    electric,
+    water
+}
+// 化学材料
+enum chemicalMaterial {
+    wooden = 1,
+    water,
+    ice,
+    stone
+}
+// 化学引擎
+class ChemicalEngine {
+    // 每个化学引擎包含许多状态机
+    stateMachines: Array<StateMachine>;
+    // 初始化状态机组
+    constructor (){
+        this.stateMachines = [];
+    }
+    // 注册状态机（创建Sprite时，将包含的状态机用此方法注册）
+    registeStateMachine(stateMachineToReceive:StateMachine){
+        this.stateMachines.push(stateMachineToReceive);
+    }
+    // 轮流检查所有状态机
+    checkAllStateMachine(){
+        for(let i = 0; i < this.stateMachines.length; i++){
+            this.stateMachines[i].checkState();
+        }
+    }
+}
+// 全局化学引擎
+const globalChemicalEngine = new ChemicalEngine();
+// 状态机
+class StateMachine {
+    sprite:SpriteWithState;
+    currentMaterial:chemicalMaterial;
+    //当前状态
+    currentState:chemicalStates;
+    //当前收到的动作
+    currentAction:chemicalActions;
+    constructor(initState:chemicalStates,initMaterial:chemicalMaterial,sprite:SpriteWithState){
+        this.currentState = initState;
+        this.currentMaterial = initMaterial;
+        this.sprite = sprite;
+    }
+    checkState(){
+        // 状态随当前接收到的动作改变
+        if (this.currentState == chemicalStates.normal){
+            if (this.currentAction == chemicalActions.burn){
+                if (this.currentMaterial == chemicalMaterial.wooden){
+                    this.stateChangeTo(chemicalStates.fireCarrying);
 
+                }
+            }
+        }
+
+
+    }
+    //接受化学动作（重叠检查时调用）
+    receiveAction(receivedAction:chemicalActions){
+        this.currentAction = receivedAction;
+
+    }
+    //将状态改变为
+    stateChangeTo(targetState:chemicalStates){
+        switch (targetState) {
+            case chemicalStates.fireCarrying:
+               this.sprite.burningAnimation();
+        }
+        this.currentState = targetState;
+        // 状态改变后动作清除
+        this.currentAction = chemicalActions.normal;
+    }
+
+}
+// 附带状态机的精灵类
+class SpriteWithState extends Sprite {
+    stateMachine:StateMachine;
+    constructor(game:Phaser.Game,x:number,y:number,image:string,currentState:chemicalStates,material:chemicalMaterial){
+        super(game,x,y,image);
+        this.stateMachine = new StateMachine(currentState,material,this);
+        globalChemicalEngine.registeStateMachine(this.stateMachine);
+    }
+    burningAnimation(){
+
+        let fireToBeShown = this.game.add.sprite(0,0,'fire');
+        fireToBeShown.animations.add('burning',[0, 1, 2, 3], 12, true);
+        fireToBeShown.animations.play('burning');
+        animation_fires.push(fireToBeShown);
+        this.addChild(fireToBeShown);
+
+
+    }
+}
 class AttackEmitter {
     owner:Sprite;
-    sword:Sprite;
+    sword:SpriteWithState;
+    swordStab:SpriteWithState = null;
     constructor(owner:Sprite){
         this.owner = owner;
     }
     hurl() {
         // alert('link made a attack!');
 
-        this.sword = this.owner.game.add.sprite(this.owner.x,this.owner.y,'sword');
-        // preSword = sword;
-        // sword = this.sword;
+        this.sword = this.owner.game.add.existing(new SpriteWithState(this.owner.game,this.owner.x,this.owner.y,'sword',chemicalStates.normal,chemicalMaterial.wooden));
+        // this.sword.burningAnimation();
         this.owner.game.physics.arcade.enable(this.sword);
         this.sword.body.bounce.y = 0.2;
         this.sword.body.collideWorldBounds = true;
@@ -55,10 +165,49 @@ class AttackEmitter {
         swords.push(this.sword);
 
     }
+    stab(){
+        if (this.swordStab != null){
+
+        }else{
+
+            this.swordStab = this.owner.game.add.existing(new SpriteWithState(this.owner.game,0,10,'sword',chemicalStates.normal,chemicalMaterial.wooden));
+        }
+
+        // this.sword.burningAnimation();
+        this.owner.game.physics.arcade.enable(this.swordStab);
+        // this.sword.body.bounce.y = 0.2;
+        this.swordStab.body.collideWorldBounds = true;
+        if (directIndicator == 1)
+        {
+            this.swordStab.frame = 3;
+            this.owner.frame = 50;
+        }
+        else if (directIndicator == 2)
+        {
+            this.swordStab.frame = 0;
+            this.owner.frame = 60;
+        }
+        else if (directIndicator == 3)
+        {
+            this.swordStab.frame = 1;
+            this.owner.frame = 40;
+        }
+        else if (directIndicator == 4)
+        {
+            this.swordStab.frame = 2;
+            this.owner.frame = 70;
+        }
+        else
+        {
+            player.frame = 0;
+        }
+        swords.push(this.swordStab);
+        this.owner.addChild(this.swordStab);
+    }
 }
 
 // 创建游戏实例
-var game = new Phaser.Game(800, 600, Phaser.AUTO, '#game', { preload: preload, create: create, update: update });
+var game = new Phaser.Game(width, height, Phaser.AUTO, '#game', { preload: preload, create: create, update: update });
 
 function layoutHeart(){
     var heartNum = player.health;
@@ -74,8 +223,6 @@ function layoutHeart(){
         }
     }
 
-    console.log(i)
-
 }
 
 function preload() {
@@ -87,40 +234,40 @@ function preload() {
     game.load.image('bgImage','resource/img/masterSword.png');
     game.load.spritesheet('sword','resource/img/sword.png',32, 32);
     game.load.spritesheet('heart','resource/img/heart.png',22, 16);
+    game.load.spritesheet('fire','resource/img/fireBall.png',28,48);
+    game.load.tilemap('desert', 'assets/tilemaps/maps/desert.json', null, Phaser.Tilemap.TILED_JSON);
+    game.load.image('tiles', 'assets/tilemaps/tiles/tmw_desert_spacing.png');
 }
 
 function create() {
-    // // 添加背景
-    // var bg = game.add.image(0, 0, 'bgImage');
-    // bg.width = game.world.width;
-    // bg.height = game.world.height;
-    // var bgMusic = game.add.audio('bgMusic');
-    // bgMusic.loopFull();
-    // // 添加标题
-    // var title = game.add.text(game.world.centerX, game.world.height*0.40, 'Legend of Zelda', {
-    //     fontSize: '40px',
-    //     fontWeight: 'bold',
-    //     fill: '#f2eedc'
-    // });
-    // title.anchor.setTo(0.5, 0.5);
-    // // 添加提示
-    // var remind = game.add.text(game.world.centerX, game.world.height*0.75, 'press to start', {
-    //     fontSize: '20px',
-    //     fill: '#ebf2ed'
-    // });
-    // remind.anchor.setTo(0.5, 0.5);
 
     game.stage.backgroundColor = '#f2eb97';
-
-    player = game.add.sprite(game.world.centerX, game.world.height*0.40,'link');
-    attackEmitter = new AttackEmitter(player);
-    game.physics.arcade.enable(player);
-    player.body.bounce.y = 0.2;
-    player.body.collideWorldBounds = true;
 
     // game.input.onTap.add(function() {
     //     game.state.start('play');
     // });
+
+    // set map
+    map = game.add.tilemap('desert');
+
+    map.addTilesetImage('Desert', 'tiles');
+
+    layer = map.createLayer('Ground');
+
+    layer.resizeWorld();
+
+    player = game.add.sprite(game.world.centerX, game.world.height*0.40,'link');
+    attackEmitter = new AttackEmitter(player);
+    console.log(player);
+    game.physics.arcade.enable(player);
+    player.body.bounce.y = 0.2;
+    player.body.collideWorldBounds = true;
+
+
+    game.camera.follow(player);
+
+    game.input.onDown.add(fillTiles, this);
+    // set map end
     player.maxHealth = 10;
     player.health = player.maxHealth;
     layoutHeart();
@@ -128,13 +275,36 @@ function create() {
     player.animations.add('left', [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], 8, true);
     player.animations.add('forward',[20, 21, 22, 23, 24, 25, 26, 27, 28, 29], 8, true);
     player.animations.add('right',[30, 31, 32, 33, 34, 35, 36, 37, 38, 39], 8, true);
+    player.animations.add('backStab', [40, 41, 42, 43, 44, 45, 46, 47], 8, true);
+    player.animations.add('leftStab', [50, 51, 52, 53, 54, 55, 56, 57], 8, true);
+    player.animations.add('forwardStab',[60, 61, 62, 63, 64, 65, 66, 67], 8, true);
+    player.animations.add('rightStab',[70, 71, 72, 73, 74, 75, 76, 77], 8, true);
+    player.animations.add('hurt',[0,10,20,30],8,true);
+
+    fire = game.add.sprite(game.world.centerX,game.world.centerY+30,'fire');
+    fire.animations.add('burning',[0, 1, 2, 3], 12, true);
+    fire.animations.play('burning');
+    game.physics.arcade.enable(fire);
 
     this.game.input.keyboard.onDownCallback = function(e) {
+        // alert(e.keyCode);
         if(e.keyCode == 32){
             attackEmitter.hurl();
         }
         else if(e.keyCode == 88){
             isLinkSightLock = 1;
+        }
+        else if(e.keyCode == 67){
+            if(isStab){
+                attackEmitter.swordStab.kill();
+                attackEmitter.swordStab = null;
+                isLinkSightLock = 0;
+                isStab = false;
+            }else{
+                isLinkSightLock = 1;
+                attackEmitter.stab();
+                isStab = true;
+            }
         }
     }
     this.game.input.keyboard.onUpCallback = function (e) {
@@ -142,15 +312,33 @@ function create() {
             isLinkSightLock = 0;
         }
     }
-}
-
-function update() {
-    if(swords){
-        game.physics.arcade.collide(swords,swords);
-        game.physics.arcade.collide(player,swords);
-    }
 
     cursors = game.input.keyboard.createCursorKeys();
+}
+
+function fillTiles() {
+
+    map.fill(31, layer.getTileX(player.x), layer.getTileY(player.y), 8, 8);
+
+}
+
+
+function update() {
+
+    if(starTime == 0){
+    }else{
+        starTime -= 1;
+    }
+
+    if(swords){
+        // game.physics.arcade.collide(swords,swords);
+        game.physics.arcade.collide(player,swords);
+        game.physics.arcade.overlap(fire, swords, meetWithFire, null, this);
+        game.physics.arcade.overlap(swords,swords, meetWithSwords, null, this);
+        game.physics.arcade.overlap(player,fire, heroGetHurt, null, this);
+    }
+
+    globalChemicalEngine.checkAllStateMachine();
     //  Reset the players velocity (movement)
     player.body.velocity.x = 0;
 
@@ -271,6 +459,42 @@ function update() {
     // {
     //     player.body.velocity.y = -350;
     // }
+}
+function meetWithFire(fire, swords) {
+    swords.stateMachine.receiveAction(chemicalActions.burn);
+    // alert('sword meet with fire');
+}
+function meetWithSwords(host, guest) {
+    if (guest.stateMachine.currentState == chemicalStates.fireCarrying) {
+        host.stateMachine.receiveAction(chemicalActions.burn);
+    }
+    // alert('sword meet with fire');
+}
+function heroGetHurt(player,fire){
+    if (starTime == 0){
+        player.health -= 1;
+        layoutHeart();
+        starTime = 30;
+        if (directIndicator == 1)
+        {
+            player.x += standBackSpeed;
+        }
+        else if (directIndicator == 2)
+        {
+            player.y += standBackSpeed;
+        }
+        else if (directIndicator == 3)
+        {
+            player.y -= standBackSpeed;
+        }
+        else if (directIndicator == 4)
+        {
+            player.x -= standBackSpeed;
+        }
+        player.animations.play('hurt');
+    }else {
+
+    }
 }
 // 定义场景
 
