@@ -3,12 +3,15 @@ import Sprite = Phaser.Sprite;
 var width = 800;
 var height = 600;
 var player;
+var jelly;
 var cursors;
 var directIndicator = 3;
 var attackEmitter;
 var hurlSpeed = 300;
 var isLinkSightLock = 0;
 var swords: Array<SpriteWithState> = [];
+var jellys: Array<SpriteWithState> = [];
+var jellysMoveSpeed = 40;
 var animation_fires: Array<Sprite> = [];
 var fire:Sprite;
 var starTime = 30;
@@ -22,7 +25,8 @@ enum chemicalStates {
     normal = 1,
     fireCarrying,
     electricCarrying,
-    moistureCarrying
+    moistureCarrying,
+    melting
 }
 // 化学动作
 enum chemicalActions {
@@ -67,6 +71,8 @@ class StateMachine {
     currentState:chemicalStates;
     //当前收到的动作
     currentAction:chemicalActions;
+
+    stateCountDown = 15;
     constructor(initState:chemicalStates,initMaterial:chemicalMaterial,sprite:SpriteWithState){
         this.currentState = initState;
         this.currentMaterial = initMaterial;
@@ -77,10 +83,18 @@ class StateMachine {
         if (this.currentState == chemicalStates.normal){
             if (this.currentAction == chemicalActions.burn){
                 if (this.currentMaterial == chemicalMaterial.wooden){
-                    this.stateChangeTo(chemicalStates.fireCarrying);
+                    if (this.stateCountDown > 0){
+                        this.stateCountDown -= 1;
+                    }else{
+                        this.stateChangeTo(chemicalStates.fireCarrying);
+                    }
 
+                }else if(this.currentMaterial == chemicalMaterial.ice){
+                    this.stateChangeTo(chemicalStates.melting);
                 }
             }
+        }else if(this.currentState == chemicalStates.melting){
+            this.sprite.meltingAnimation();
         }
 
 
@@ -95,6 +109,8 @@ class StateMachine {
         switch (targetState) {
             case chemicalStates.fireCarrying:
                this.sprite.burningAnimation();
+            case chemicalStates.melting:
+                this.sprite.meltingAnimation();
         }
         this.currentState = targetState;
         // 状态改变后动作清除
@@ -105,20 +121,26 @@ class StateMachine {
 // 附带状态机的精灵类
 class SpriteWithState extends Sprite {
     stateMachine:StateMachine;
+    fireToBeShown:Sprite;
     constructor(game:Phaser.Game,x:number,y:number,image:string,currentState:chemicalStates,material:chemicalMaterial){
         super(game,x,y,image);
         this.stateMachine = new StateMachine(currentState,material,this);
         globalChemicalEngine.registeStateMachine(this.stateMachine);
     }
     burningAnimation(){
-
-        let fireToBeShown = this.game.add.sprite(0,0,'fire');
-        fireToBeShown.animations.add('burning',[0, 1, 2, 3], 12, true);
-        fireToBeShown.animations.play('burning');
-        animation_fires.push(fireToBeShown);
-        this.addChild(fireToBeShown);
-
-
+        this.fireToBeShown = this.game.add.sprite(0,0,'fire');
+        this.fireToBeShown.animations.add('burning',[0, 1, 2, 3], 12, true);
+        this.fireToBeShown.animations.play('burning');
+        animation_fires.push(this.fireToBeShown);
+        this.addChild(this.fireToBeShown);
+    }
+    meltingAnimation(){
+        this.height *= 0.95;
+    }
+    dead(){
+        if (this.fireToBeShown){
+            this.fireToBeShown.kill();
+        }
     }
 }
 class AttackEmitter {
@@ -237,6 +259,7 @@ function preload() {
     game.load.spritesheet('fire','resource/img/fireBall.png',28,48);
     game.load.tilemap('desert', 'assets/tilemaps/maps/desert.json', null, Phaser.Tilemap.TILED_JSON);
     game.load.image('tiles', 'assets/tilemaps/tiles/tmw_desert_spacing.png');
+    game.load.spritesheet('jelly','resource/img/jellyIce.png',32, 48);
 }
 
 function create() {
@@ -256,7 +279,19 @@ function create() {
 
     layer.resizeWorld();
 
-    player = game.add.sprite(game.world.centerX, game.world.height*0.40,'link');
+    player = game.add.sprite(game.world.centerX, game.world.height*0.50,'link');
+
+    //生成一个jelly
+    for (let i = 0; i < 30; i++){
+        jelly = game.add.existing(new SpriteWithState(game,game.world.centerX - productRandomNumber(-80,80), game.world.height*0.30 - productRandomNumber(-80,80),'jelly',chemicalStates.normal,chemicalMaterial.ice))
+        jellys.push(jelly);
+        game.physics.arcade.enable(jelly);
+        jelly.body.collideWorldBounds = true;
+        jelly.animations.add('move',[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], 8,true);
+        jelly.animations.add('dead',[26,25,24,23,22,21,20,19,18,17,16], 8,true);
+        jelly.health = 900;
+    }
+    //
     attackEmitter = new AttackEmitter(player);
     console.log(player);
     game.physics.arcade.enable(player);
@@ -333,12 +368,18 @@ function update() {
     if(swords){
         // game.physics.arcade.collide(swords,swords);
         game.physics.arcade.collide(player,swords);
+        // game.physics.arcade.collide(jellys,jellys);
         game.physics.arcade.overlap(fire, swords, meetWithFire, null, this);
+        game.physics.arcade.overlap(fire, jellys,meetWithFire, null, this);
+        game.physics.arcade.overlap(jellys,jellys,jellyMeetWithJelly,null,this);
         game.physics.arcade.overlap(swords,swords, meetWithSwords, null, this);
         game.physics.arcade.overlap(player,fire, heroGetHurt, null, this);
+        game.physics.arcade.overlap(jellys,swords,jellysGetHurt,null,this);
+        game.physics.arcade.overlap(player,jellys, heroGetHurt, null, this);
     }
 
     globalChemicalEngine.checkAllStateMachine();
+    checkJelllyLife();
     //  Reset the players velocity (movement)
     player.body.velocity.x = 0;
 
@@ -453,7 +494,38 @@ function update() {
         }
     }
 
+    for (let i = 0; i < jellys.length; i++){
+        if (jellys[i].health > 0){
+            jellys[i].animations.play('move');
+            let distance = Math.sqrt((jellys[i].x - player.x)*(jellys[i].x - player.x) + (jellys[i].y - player.y)*(jellys[i].y - player.y));
+            let distanceX = Math.sqrt((jellys[i].x - player.x)*(jellys[i].x - player.x));
+            let distanceY = Math.sqrt((jellys[i].y - player.y)*(jellys[i].y - player.y));
+            if (distance < 1000){
+                if (jellys[i].x < player.x){
+                    if (jellys[i].y < player.y){
+                        jellys[i].body.velocity.y = Math.sqrt(jellysMoveSpeed * jellysMoveSpeed /((distanceX/distanceY)*(distanceX/distanceY) + 1))*(productRandomNumber(0.7,1));
+                        jellys[i].body.velocity.x = jellys[i].body.velocity.y * distanceX/distanceY*(productRandomNumber(0.7,1));
+                    }else{
+                        jellys[i].body.velocity.y = -Math.sqrt(jellysMoveSpeed * jellysMoveSpeed /((distanceX/distanceY)*(distanceX/distanceY) + 1))*(productRandomNumber(0.7,1));
+                        jellys[i].body.velocity.x = -jellys[i].body.velocity.y * distanceX/distanceY*(productRandomNumber(0.7,1));
+                    }
+                }else{
+                    if (jellys[i].y < player.y){
+                        jellys[i].body.velocity.y = Math.sqrt(jellysMoveSpeed * jellysMoveSpeed /((distanceX/distanceY)*(distanceX/distanceY) + 1))*(productRandomNumber(0.7,1));
+                        jellys[i].body.velocity.x = -jellys[i].body.velocity.y * distanceX/distanceY*(productRandomNumber(0.7,1));
+                    }else{
+                        jellys[i].body.velocity.y = -Math.sqrt(jellysMoveSpeed * jellysMoveSpeed /((distanceX/distanceY)*(distanceX/distanceY) + 1))*(productRandomNumber(0.7,1));
+                        jellys[i].body.velocity.x = jellys[i].body.velocity.y * distanceX/distanceY*(productRandomNumber(0.7,1));
+                    }
+                }
 
+            }
+        }else{
+            jellys[i].body.velocity.x = 0;
+            jellys[i].body.velocity.y = 0;
+        }
+
+    }
     //  Allow the player to jump if they are touching the ground.
     // if (cursors.up.isDown && player.body.touching.down && hitPlatform)
     // {
@@ -469,6 +541,12 @@ function meetWithSwords(host, guest) {
         host.stateMachine.receiveAction(chemicalActions.burn);
     }
     // alert('sword meet with fire');
+}
+function jellysGetHurt(jellys,swords){
+    if (swords.stateMachine.currentState == chemicalStates.fireCarrying){
+        jellys.stateMachine.receiveAction(chemicalActions.burn);
+    }
+    jellys.health -= 8;
 }
 function heroGetHurt(player,fire){
     if (starTime == 0){
@@ -496,8 +574,31 @@ function heroGetHurt(player,fire){
 
     }
 }
-// 定义场景
+function checkJelllyLife(){
+    for (let i = 0 ; i < jellys.length; i++){
+        // alert(jellys[i].health);
+        if (jellys[i].health <= 0){
+            jellys[i].dead();
+            jellys[i].animations.play('dead',null,false,true);
 
+        }else{
+            if (jellys[i].stateMachine.currentState == chemicalStates.fireCarrying){
+                jellys[i].health -= 3;
+            }
+        }
+
+    }
+}
+function jellyMeetWithJelly(jellyOne,jellyTwo){
+    if (jellyOne.stateMachine.currentState == chemicalStates.fireCarrying){
+        jellyTwo.stateMachine.receiveAction(chemicalActions.burn);
+    }
+}
+// 定义场景
+function productRandomNumber(from:number,to:number){
+    let offset = to-from;
+    return (from + offset*Math.random());
+}
 
 
 // 启动游戏
